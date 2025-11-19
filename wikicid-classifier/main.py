@@ -96,7 +96,7 @@ class WikiCIDProcessor:
             try:
                 # 1. Extraer información del website
                 logger.info(f"🌐 Extrayendo información de: {website}")
-                info = self.scraper.extract_info(website)
+                info = self.scraper.extract_info(website, nombre)
                 
                 if not info:
                     logger.warning(f"⚠ No se pudo extraer información del website")
@@ -201,7 +201,7 @@ def main():
     
     modo = input("\nSelecciona una opción (1 o 2): ").strip()
     
-    limit = 5 if modo == "1" else None
+    limit = 10 if modo == "1" else None
     
     if modo == "1":
         print("\n⚡ Modo PRUEBA activado - Se procesarán solo 10 empresas")
