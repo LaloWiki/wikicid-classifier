@@ -1,12 +1,12 @@
 """
-Clasificador de empresas usando Groq AI
+Clasificador de empresas usando OpenAI
 """
 
 import os
 import json
 import time
 from typing import Dict, List, Optional
-from groq import Groq
+from openai import OpenAI
 from dotenv import load_dotenv
 import logging
 
@@ -22,8 +22,8 @@ load_dotenv()
 
 class EmpresaClassifier:
     def __init__(self):
-        self.groq_client = Groq(api_key=os.getenv('GROQ_API_KEY'))
-        self.model = os.getenv('MODEL', 'llama-3.1-70b-versatile')
+        self.openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        self.model = 'gpt-4o-mini'  # Modelo más económico y rápido
         self.max_retries = int(os.getenv('MAX_RETRIES', 3))
         
         # Definir sectores y casos de uso
@@ -76,7 +76,7 @@ class EmpresaClassifier:
         
         for intento in range(self.max_retries):
             try:
-                response = self.groq_client.chat.completions.create(
+                response = self.openai_client.chat.completions.create(
                     model=self.model,
                     messages=[
                         {
