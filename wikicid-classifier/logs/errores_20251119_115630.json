@@ -1,0 +1,12 @@
+[
+  {
+    "id": "105",
+    "nombre": "Adobe",
+    "error": "Error al extraer información del website"
+  },
+  {
+    "id": "107",
+    "nombre": "Adobe Target",
+    "error": "Error al extraer información del website"
+  }
+]
