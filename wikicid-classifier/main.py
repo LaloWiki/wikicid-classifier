@@ -1,5 +1,6 @@
 """
 Script principal para clasificar empresas de WikiCID usando IA
+CON FILTRO ESTRICTO: Solo empresas que ofrezcan soluciones de IA
 """
 
 import os
@@ -7,7 +8,6 @@ import json
 import time
 import pandas as pd
 from datetime import datetime
-from pathlib import Path
 from tqdm import tqdm
 import logging
 
@@ -59,13 +59,14 @@ class WikiCIDProcessor:
         df = pd.read_excel(input_file)
         logger.info(f"📁 Archivo cargado: {len(df)} empresas encontradas")
         
-        # Aplicar límite si se especifica (para pruebas)
+        # Aplicar límite si se especifica
         if limit:
             df = df.head(limit)
             logger.info(f"⚠ Modo prueba: procesando solo {limit} empresas")
         
         # Procesar cada empresa
         empresas_clasificadas = []
+        empresas_no_ia = []  # Empresas descartadas por NO ser de IA
         errores = []
         
         for idx, row in tqdm(df.iterrows(), total=len(df), desc="Procesando empresas"):
@@ -79,8 +80,14 @@ class WikiCIDProcessor:
             
             # Verificar si ya está en cache
             if empresa_id in self.empresas_procesadas:
-                logger.info(f"✓ Empresa ya procesada (usando cache)")
-                empresas_clasificadas.append(self.empresas_procesadas[empresa_id])
+                empresa_cache = self.empresas_procesadas[empresa_id]
+                # Verificar si fue descartada como NO-IA
+                if empresa_cache.get('es_no_ia'):
+                    logger.info(f"✓ Empresa en cache: NO es de IA")
+                    empresas_no_ia.append(empresa_cache)
+                else:
+                    logger.info(f"✓ Empresa en cache: Clasificada")
+                    empresas_clasificadas.append(empresa_cache)
                 continue
             
             # Verificar si tiene website
@@ -99,11 +106,11 @@ class WikiCIDProcessor:
                 info = self.scraper.extract_info(website, nombre)
                 
                 if not info:
-                    logger.warning(f"⚠ No se pudo extraer información del website")
+                    logger.warning(f"⚠ No se pudo extraer información")
                     errores.append({
                         'id': empresa_id,
                         'nombre': nombre,
-                        'error': 'Error al extraer información del website'
+                        'error': 'Error al extraer información'
                     })
                     continue
                 
@@ -112,17 +119,36 @@ class WikiCIDProcessor:
                 info['nombre'] = nombre
                 info['website'] = website
                 
-                # 2. Clasificar con IA
+                # 2. Evaluar si es empresa de IA
+                logger.info(f"🔍 Evaluando si es empresa de IA...")
+                es_ia, razon = self.classifier.es_empresa_ia(info)
+                
+                if not es_ia:
+                    # NO es empresa de IA, guardar en lista de descartadas
+                    empresa_no_ia = {
+                        'id': empresa_id,
+                        'nombre': nombre,
+                        'website': website,
+                        'razon': razon,
+                        'es_no_ia': True
+                    }
+                    empresas_no_ia.append(empresa_no_ia)
+                    self.empresas_procesadas[empresa_id] = empresa_no_ia
+                    logger.warning(f"⚠ Empresa descartada: NO ofrece soluciones de IA")
+                    continue
+                
+                # 3. Clasificar con IA (solo si es relevante)
                 logger.info(f"🤖 Clasificando empresa con IA...")
                 clasificacion = self.classifier.clasificar_empresa(info)
                 
-                # 3. Guardar resultado
+                # 4. Guardar resultado
                 empresa_completa = {
                     'id': empresa_id,
                     'nombre': nombre,
                     'website': website,
                     'info': info,
-                    'clasificacion': clasificacion
+                    'clasificacion': clasificacion,
+                    'es_no_ia': False
                 }
                 
                 empresas_clasificadas.append(empresa_completa)
@@ -133,7 +159,7 @@ class WikiCIDProcessor:
                     self._guardar_cache()
                     logger.info(f"💾 Cache guardado ({len(self.empresas_procesadas)} empresas)")
                 
-                # Pequeña pausa para no saturar APIs
+                # Pausa para no saturar APIs
                 time.sleep(1)
                 
             except Exception as e:
@@ -148,7 +174,14 @@ class WikiCIDProcessor:
         # Guardar cache final
         self._guardar_cache()
         
-        # Generar reporte de errores si los hay
+        # Guardar empresas NO-IA en archivo separado
+        if empresas_no_ia:
+            no_ia_file = f'logs/empresas_no_ia_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+            with open(no_ia_file, 'w', encoding='utf-8') as f:
+                json.dump(empresas_no_ia, f, ensure_ascii=False, indent=2)
+            logger.info(f"📋 Empresas NO-IA guardadas en: {no_ia_file}")
+        
+        # Generar reporte de errores
         if errores:
             error_file = f'logs/errores_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
             with open(error_file, 'w', encoding='utf-8') as f:
@@ -158,16 +191,15 @@ class WikiCIDProcessor:
         logger.info("\n" + "=" * 80)
         logger.info("✅ PROCESAMIENTO COMPLETADO")
         logger.info("=" * 80)
-        logger.info(f"✓ Empresas procesadas: {len(empresas_clasificadas)}")
+        logger.info(f"✓ Empresas de IA clasificadas: {len(empresas_clasificadas)}")
+        logger.info(f"✗ Empresas descartadas (NO-IA): {len(empresas_no_ia)}")
         logger.info(f"✗ Empresas con errores: {len(errores)}")
         logger.info(f"💾 Cache guardado en: {self.cache_file}")
         
         return empresas_clasificadas
     
     def generar_excel_final(self, empresas_clasificadas: list, output_file: str):
-        """
-        Genera el Excel final con las empresas clasificadas
-        """
+        """Genera el Excel final"""
         logger.info("\n" + "=" * 80)
         logger.info("📊 GENERANDO EXCEL FINAL")
         logger.info("=" * 80)
@@ -175,7 +207,7 @@ class WikiCIDProcessor:
         generator = ExcelGenerator(output_file)
         excel_path = generator.generar_excel(empresas_clasificadas)
         
-        logger.info(f"✅ Excel generado exitosamente: {excel_path}")
+        logger.info(f"✅ Excel generado: {excel_path}")
         return excel_path
 
 def main():
@@ -185,39 +217,32 @@ def main():
     ║                                                               ║
     ║         🤖 CLASIFICADOR DE EMPRESAS WIKICID CON IA 🤖         ║
     ║                                                               ║
-    ║                   Powered by Groq AI 🚀                       ║
+    ║              Con filtro de empresas de IA ✨                  ║
     ║                                                               ║
     ╚═══════════════════════════════════════════════════════════════╝
     """)
     
-    # Configuración
     input_file = 'input/empresas_wikicid.xlsx'
     output_file = f'output/empresas_clasificadas_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx'
     
-    # Preguntar si es modo prueba
     print("\n¿Deseas ejecutar en modo prueba?")
     print("1. Sí - Procesar solo 10 empresas (prueba rápida)")
     print("2. No - Procesar todas las 801 empresas (proceso completo)")
     
-    modo = input("\nSelecciona una opción (1 o 2): ").strip()
-    
+    modo = input("\nSelecciona (1 o 2): ").strip()
     limit = 10 if modo == "1" else None
     
     if modo == "1":
-        print("\n⚡ Modo PRUEBA activado - Se procesarán solo 10 empresas")
+        print("\n⚡ Modo PRUEBA - 10 empresas")
     else:
-        print("\n🚀 Modo COMPLETO activado - Se procesarán todas las empresas")
-        print("⏱ Tiempo estimado: 45-60 minutos")
+        print("\n🚀 Modo COMPLETO - 801 empresas")
+        print("⏱ Tiempo estimado: 50-70 minutos")
+        print("💰 Costo estimado: ~$1.50-2.00 USD")
     
     input("\nPresiona ENTER para comenzar...")
     
-    # Crear processor y ejecutar
     processor = WikiCIDProcessor()
-    
-    # Procesar empresas
     empresas_clasificadas = processor.procesar_empresas(input_file, limit=limit)
-    
-    # Generar Excel
     excel_path = processor.generar_excel_final(empresas_clasificadas, output_file)
     
     print(f"""
@@ -228,10 +253,10 @@ def main():
     ╚═══════════════════════════════════════════════════════════════╝
     
     📊 Excel generado: {excel_path}
-    💾 Cache guardado para futuras ejecuciones
-    📋 Logs disponibles en: logs/
+    💾 Empresas NO-IA guardadas en: logs/empresas_no_ia_*.json
+    📋 Logs en: logs/
     
-    ¡Listo para entregar a tu líder! 🎉
+    ¡Listo para tu líder! 🎉
     """)
 
 if __name__ == "__main__":
