@@ -1,11 +1,11 @@
 """
-Clasificador de empresas usando OpenAI
+Clasificador de empresas usando OpenAI con filtro estricto de IA
 """
 
 import os
 import json
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from openai import OpenAI
 from dotenv import load_dotenv
 import logging
@@ -23,55 +23,132 @@ load_dotenv()
 class EmpresaClassifier:
     def __init__(self):
         self.openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        self.model = 'gpt-4o-mini'  # Modelo más económico y rápido
+        self.model = 'gpt-4o-mini'
         self.max_retries = int(os.getenv('MAX_RETRIES', 3))
         
-        # Definir sectores y casos de uso
+        # Definir sectores y casos de uso EXACTOS según PowerPoint
         self.sectores = {
-            'Sector financiero': [
-                'Fraude en tiempo real',
-                'Scoring crediticio alternativo',
-                'Agente LLM para atención y soporte bancario',
-                'Resumen inteligente de expedientes/KYC/auditorías',
-                'Agente AML/KYC con razonamiento y acciones',
-                'Agente financiero autoservicio (Banca personal)',
-                'Predicción de churn',
-                'Predicción de red/capacity planning'
-            ],
-            'Telecomunicaciones': [
-                'Agentes de atención y soporte (Whatsapp, voz, apps)',
-                'Resumen inteligente de interacciones, tickets y fallas',
-                'Agente de postventa multicanal (portabilidad, facturación)',
-                'Agente de operaciones de red (diagnóstico, órdenes de trabajo)',
-                'Forecasting de demanda',
-                'Pricing dinámico/optimización de inventario'
-            ],
-            'Retail eCommerce': [
-                'Product descriptions + enrichment',
-                'Atención/venta conversacional en eCommerce',
-                'Agentes de operación en tiendas (reabastecimiento, quiebres)',
-                'Agente de marketing automatizado (campañas, segmentación, cross-sell)',
-                'Diagnóstico por imágenes asistido',
-                'Modelos de riesgo de enfermedades'
-            ],
-            'Salud': [
-                'Resumen de expediente clínico',
-                'Generación de notas médicas y documentación',
-                'Agente administrativo (citas, preautorizaciones, pagos)',
-                'Agente de soporte clínico (protocolos, dosificación, guías)'
-            ]
+            'Sector financiero': {
+                'IA tradicional ML clásico': [
+                    'Fraude en tiempo real',
+                    'Scoring crediticio alternativo'
+                ],
+                'IA Generativa (Gen IA)': [
+                    'Agente LLM para atención y soporte bancario',
+                    'Resumen inteligente de expedientes/KYC/auditorías'
+                ],
+                'IA Agéntica': [
+                    'Agente AML/KYC con razonamiento y acciones',
+                    'Agente financiero autoservicio (Banca personal)'
+                ]
+            },
+            'Telecomunicaciones': {
+                'IA tradicional ML clásico': [
+                    'Predicción de churn',
+                    'Optimización de red/capacity planning'
+                ],
+                'IA Generativa (Gen IA)': [
+                    'Agentes de atención y soporte (WhatsApp, voz, apps)',
+                    'Resumen inteligente de interacciones, tickets y fallas'
+                ],
+                'IA Agéntica': [
+                    'Agente de postventa multicanal (portabilidad, facturación, reclamos)',
+                    'Agente de operaciones de red (diagnóstico, órdenes de visita, MTTx)'
+                ]
+            },
+            'Retail eCommerce': {
+                'IA tradicional ML clásico': [
+                    'Forecasting de demanda',
+                    'Pricing dinámico/optimización de inventario'
+                ],
+                'IA Generativa (Gen IA)': [
+                    'Product descriptions + enrichment',
+                    'Atención/venta conversacional en eCommerce'
+                ],
+                'IA Agéntica': [
+                    'Agentes de operación en tiendas (reabastecimiento, quiebres)',
+                    'Agentes de marketing automatizado (campañas, segmentación, cross-sell)'
+                ]
+            },
+            'Salud': {
+                'IA tradicional ML clásico': [
+                    'Diagnóstico por imágenes asistido',
+                    'Modelos de riesgo de enfermedades'
+                ],
+                'IA Generativa (Gen IA)': [
+                    'Resumen de expediente clínico',
+                    'Generación de notas médicas y documentación'
+                ],
+                'IA Agéntica': [
+                    'Agente administrativo (citas, preautorizaciones, pagos)',
+                    'Agente de soporte clínico (protocolos, dosificación, guías de tratamiento)'
+                ]
+            }
         }
+    
+    def es_empresa_ia(self, empresa_info: Dict) -> Tuple[bool, str]:
+        """
+        Evalúa si la empresa tiene soluciones de Inteligencia Artificial
+        """
+        prompt = f"""
+Analiza si esta empresa ofrece soluciones de Inteligencia Artificial.
+
+**INFORMACIÓN:**
+Nombre: {empresa_info.get('nombre', 'N/A')}
+Descripción: {empresa_info.get('description', 'N/A')}
+Contenido: {empresa_info.get('text_content', 'N/A')[:800]}
+
+**ES IA SI OFRECE:**
+✓ Machine Learning/Deep Learning
+✓ NLP/LLMs/GPT
+✓ Computer Vision
+✓ Chatbots con IA
+✓ Análisis predictivo ML
+✓ Recomendaciones ML
+✓ Detección fraude ML
+
+**NO ES IA:**
+✗ Software sin IA
+✗ Cloud/infraestructura
+✗ Testing/QA básico
+✗ CRM/ERP sin IA
+
+Responde JSON (sin markdown):
+{{
+  "es_ia": true/false,
+  "razon": "breve"
+}}
+"""
         
-        self.tipos_ia = [
-            'IA tradicional ML clásico',
-            'IA Generativa (Gen IA)',
-            'IA Agéntica'
-        ]
+        try:
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "Experto en IA. Sé ESTRICTO. Solo JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=200,
+                response_format={"type": "json_object"}
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            es_ia = result.get('es_ia', False)
+            razon = result.get('razon', '')
+            
+            if es_ia:
+                logger.info(f"✓ ES IA: {razon}")
+            else:
+                logger.info(f"✗ NO ES IA: {razon}")
+            
+            return es_ia, razon
+            
+        except Exception as e:
+            logger.warning(f"⚠ Error evaluando IA: {e}")
+            return True, "Error - revisar manual"
     
     def clasificar_empresa(self, empresa_info: Dict) -> Dict:
-        """
-        Clasifica una empresa en sectores, tipo de IA y casos de uso
-        """
+        """Clasifica empresa en sectores y casos de uso"""
         prompt = self._crear_prompt(empresa_info)
         
         for intento in range(self.max_retries):
@@ -81,31 +158,21 @@ class EmpresaClassifier:
                     messages=[
                         {
                             "role": "system",
-                            "content": "Eres un experto en clasificación de empresas de tecnología e inteligencia artificial. Tu tarea es clasificar empresas según su sector de aplicación, tipo de IA que desarrollan, y casos de uso específicos. Responde SOLO con un JSON válido, sin texto adicional."
+                            "content": "Experto clasificador IA. REGLAS: 1) Solo asigna casos de uso del tipo IA correcto 2) Sé específico 3) Solo JSON"
                         },
-                        {
-                            "role": "user",
-                            "content": prompt
-                        }
+                        {"role": "user", "content": prompt}
                     ],
-                    temperature=0.3,
+                    temperature=0.2,
                     max_tokens=1500,
                     response_format={"type": "json_object"}
                 )
                 
                 result = json.loads(response.choices[0].message.content)
-                logger.info(f"✓ Empresa clasificada: {empresa_info.get('nombre', 'Desconocida')}")
-                
+                logger.info(f"✓ Clasificada: {empresa_info.get('nombre')}")
                 return result
                 
-            except json.JSONDecodeError as e:
-                logger.warning(f"⚠ Error decodificando JSON (intento {intento + 1}/{self.max_retries}): {e}")
-                if intento == self.max_retries - 1:
-                    return self._clasificacion_por_defecto()
-                time.sleep(2)
-                
             except Exception as e:
-                logger.error(f"✗ Error en clasificación (intento {intento + 1}/{self.max_retries}): {e}")
+                logger.error(f"✗ Error (intento {intento + 1}): {e}")
                 if intento == self.max_retries - 1:
                     return self._clasificacion_por_defecto()
                 time.sleep(2)
@@ -113,89 +180,54 @@ class EmpresaClassifier:
         return self._clasificacion_por_defecto()
     
     def _crear_prompt(self, empresa_info: Dict) -> str:
-        """Crea el prompt para la clasificación"""
-        
-        sectores_str = "\n".join([f"- {sector}: {', '.join(casos)}" 
-                                  for sector, casos in self.sectores.items()])
-        tipos_ia_str = "\n".join([f"- {tipo}" for tipo in self.tipos_ia])
-        
-        prompt = f"""
-Analiza la siguiente información de una empresa y clasifícala:
+        """Crea prompt de clasificación"""
+        return f"""
+Clasifica esta empresa de IA:
 
-**INFORMACIÓN DE LA EMPRESA:**
-Nombre: {empresa_info.get('nombre', 'N/A')}
-Website: {empresa_info.get('website', 'N/A')}
-Título: {empresa_info.get('title', 'N/A')}
-Descripción: {empresa_info.get('description', 'N/A')}
-Meta descripción: {empresa_info.get('meta_description', 'N/A')}
-H1 Tags: {empresa_info.get('h1_tags', 'N/A')}
-Keywords: {empresa_info.get('keywords', 'N/A')}
-Contenido: {empresa_info.get('text_content', 'N/A')[:500]}
+**EMPRESA:**
+Nombre: {empresa_info.get('nombre')}
+Descripción: {empresa_info.get('description', '')}
+Contenido: {empresa_info.get('text_content', '')[:1000]}
 
-**SECTORES DISPONIBLES Y SUS CASOS DE USO:**
-{sectores_str}
+**SECTORES Y CASOS:**
 
-**TIPOS DE IA:**
-{tipos_ia_str}
+FINANCIERO:
+- ML: Fraude tiempo real, Scoring crediticio
+- GenIA: Agente LLM bancario, Resumen KYC/auditorías
+- Agéntica: Agente AML/KYC, Agente financiero autoservicio
 
-Donde:
-- IA tradicional ML clásico: Machine Learning clásico, predicción, análisis de datos
-- IA Generativa (Gen IA): Generación de contenido, LLMs, ChatGPT-like, síntesis
-- IA Agéntica: Agentes autónomos que pueden realizar acciones, tomar decisiones, workflows
+TELECOMUNICACIONES:
+- ML: Predicción churn, Optimización red
+- GenIA: Agentes atención (WhatsApp/voz), Resumen tickets
+- Agéntica: Agente postventa, Agente operaciones red
 
-**INSTRUCCIONES:**
-1. Identifica a qué sector(es) pertenece (puede ser múltiple)
-2. Determina el tipo de IA principal
-3. Asigna los casos de uso específicos que aplican (pueden ser varios)
-4. Proporciona una descripción relevante breve (1-2 líneas)
-5. Indica nivel de ajuste (1=perfecto, 2=bueno, 3=aceptable)
+RETAIL:
+- ML: Forecasting demanda, Pricing dinámico
+- GenIA: Product descriptions, Atención conversacional
+- Agéntica: Agentes tiendas, Marketing automatizado
 
-Responde ÚNICAMENTE con este JSON (sin markdown, sin ```json):
+SALUD:
+- ML: Diagnóstico imágenes, Modelos riesgo
+- GenIA: Resumen expediente, Notas médicas
+- Agéntica: Agente administrativo, Soporte clínico
+
+Responde JSON (sin markdown):
 {{
-  "sectores": ["Sector 1", "Sector 2"],
-  "tipo_ia": "Tipo de IA principal",
-  "casos_uso": {{
-    "Sector 1": ["Caso de uso 1", "Caso de uso 2"],
-    "Sector 2": ["Caso de uso X"]
-  }},
-  "descripcion_relevante": "Descripción breve de la empresa y su solución",
+  "sectores": ["Sector"],
+  "tipo_ia": "IA tradicional ML clásico" o "IA Generativa (Gen IA)" o "IA Agéntica",
+  "casos_uso": {{"Sector": ["Caso exacto"]}},
+  "descripcion_relevante": "Qué hace y cómo usa IA",
   "nivel_ajuste": 1,
-  "observaciones": "Observaciones adicionales si las hay"
+  "observaciones": ""
 }}
 """
-        return prompt
     
     def _clasificacion_por_defecto(self) -> Dict:
-        """Retorna una clasificación por defecto en caso de error"""
         return {
             "sectores": ["No clasificado"],
             "tipo_ia": "Requiere revisión manual",
             "casos_uso": {},
-            "descripcion_relevante": "Clasificación automática fallida - requiere revisión manual",
+            "descripcion_relevante": "Error en clasificación",
             "nivel_ajuste": 3,
-            "observaciones": "Error en clasificación automática"
+            "observaciones": "Error automático"
         }
-
-def test_classifier():
-    """Función de prueba"""
-    classifier = EmpresaClassifier()
-    
-    test_empresa = {
-        'nombre': '247.ai',
-        'website': 'https://www.247.ai',
-        'title': '247.ai - AI-Powered Customer Service',
-        'description': 'Conversational AI platform for customer service automation using natural language processing and machine learning.',
-        'meta_description': 'Transform customer experience with AI chatbots and virtual agents',
-        'h1_tags': 'Customer Service AI | Conversational AI Platform',
-        'keywords': 'AI, chatbot, customer service, automation',
-        'text_content': '247.ai provides artificial intelligence solutions for customer service including chatbots, virtual agents, and conversational AI platforms for enterprises.'
-    }
-    
-    print("\n🧪 Probando clasificador con empresa de prueba...\n")
-    resultado = classifier.clasificar_empresa(test_empresa)
-    
-    print("✅ Resultado de clasificación:")
-    print(json.dumps(resultado, indent=2, ensure_ascii=False))
-
-if __name__ == "__main__":
-    test_classifier()
